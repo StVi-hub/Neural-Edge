@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "label": "fp32-baseline",
+  "timestamp_utc": "2026-07-25T19:56:51+00:00",
+  "git_commit": "066cb7c",
+  "config": {
+    "model": "yolo11n.pt",
+    "source": "clip.mp4",
+    "imgsz": 640,
+    "device": "0",
+    "warmup": 100,
+    "measure": 500,
+    "runs": 1,
+    "precision": "fp32",
+    "preprocessing_in_timer": false
+  },
+  "environment": {
+    "platform": "Windows-10-10.0.22631-SP0",
+    "python": "3.11.9",
+    "torch": "2.5.1+cu121",
+    "cuda": "12.1",
+    "gpu_name": "NVIDIA GeForce RTX 2060",
+    "driver_version": "610.62"
+  },
+  "map50_95": null,
+  "runs_detail": [
+    {
+      "latency_ms": {
+        "p50": 16.31,
+        "p95": 19.764,
+        "mean": 16.661,
+        "stdev": 1.65
+      },
+      "fps": 60.02,
+      "vram_mb": 2279.4,
+      "power_w_mean": 50.88,
+      "frames_measured": 500
+    }
+  ],
+  "summary": {
+    "p50_ms": 16.31,
+    "p95_ms": 19.764,
+    "fps": 60.02,
+    "vram_mb": 2279.4,
+    "power_w_mean": 50.88
+  },
+  "notes": ""
+}
