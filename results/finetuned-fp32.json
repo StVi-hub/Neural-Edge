@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "label": "finetuned-fp32",
+  "timestamp_utc": "2026-07-26T14:04:09+00:00",
+  "git_commit": "82f1826",
+  "config": {
+    "model": "runs/detect/indoor-nav-v1/weights/best.pt",
+    "source": "clip.mp4",
+    "imgsz": 640,
+    "device": "0",
+    "warmup": 100,
+    "measure": 500,
+    "runs": 1,
+    "precision": "fp32",
+    "preprocessing_in_timer": false
+  },
+  "environment": {
+    "platform": "Windows-10-10.0.22631-SP0",
+    "python": "3.11.9",
+    "torch": "2.5.1+cu121",
+    "cuda": "12.1",
+    "gpu_name": "NVIDIA GeForce RTX 2060",
+    "driver_version": "610.62"
+  },
+  "map50_95": null,
+  "runs_detail": [
+    {
+      "latency_ms": {
+        "p50": 15.851,
+        "p95": 19.65,
+        "mean": 16.34,
+        "stdev": 1.758
+      },
+      "fps": 61.2,
+      "vram_mb": 2256.4,
+      "power_w_mean": 45.55,
+      "frames_measured": 500
+    }
+  ],
+  "summary": {
+    "p50_ms": 15.851,
+    "p95_ms": 19.65,
+    "fps": 61.2,
+    "vram_mb": 2256.4,
+    "power_w_mean": 45.55
+  },
+  "notes": ""
+}
