@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "label": "fp16-trt",
+  "timestamp_utc": "2026-07-26T17:57:00+00:00",
+  "git_commit": "82f1826",
+  "config": {
+    "model": "models/yolo11n-indoor-fp16.engine",
+    "source": "clip.mp4",
+    "imgsz": 640,
+    "device": "0",
+    "warmup": 100,
+    "measure": 500,
+    "runs": 1,
+    "precision": "fp32",
+    "preprocessing_in_timer": false
+  },
+  "environment": {
+    "platform": "Windows-10-10.0.22631-SP0",
+    "python": "3.11.9",
+    "torch": "2.5.1+cu121",
+    "cuda": "12.1",
+    "gpu_name": "NVIDIA GeForce RTX 2060",
+    "driver_version": "610.62"
+  },
+  "map50_95": {
+    "map50_95": 0.5604,
+    "map50": 0.7564,
+    "precision": 0.7831,
+    "recall": 0.7403
+  },
+  "runs_detail": [
+    {
+      "latency_ms": {
+        "p50": 8.01,
+        "p95": 10.424,
+        "mean": 8.257,
+        "stdev": 1.213
+      },
+      "fps": 121.11,
+      "vram_mb": 2683.0,
+      "power_w_mean": 48.12,
+      "frames_measured": 500
+    }
+  ],
+  "summary": {
+    "p50_ms": 8.01,
+    "p95_ms": 10.424,
+    "fps": 121.11,
+    "vram_mb": 2683.0,
+    "power_w_mean": 48.12
+  },
+  "notes": ""
+}

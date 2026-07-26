@@ -111,3 +111,145 @@ One short entry per work session: what I did, why, what blocked me, what's next.
 - Audit per-class image counts in the training set.
 - W3: write the pruning notes first, then torch-pruning at 20 % and 40 % sparsity, with a
   benchmark run after each.
+
+## 2026-07-26 - W3: fine-tune evaluated, structured pruning descoped after root-cause analysis
+
+**Fine-tune results (60 epochs, ~50 min)**
+- mAP50-95 **0.566**, mAP50 0.751, precision 0.886, recall 0.670.
+- Worth being precise about what this means: the pretrained COCO model scores effectively
+  zero on this dataset, because COCO has no "exit sign", "fire extinguisher" or "push handle"
+  classes at all. So the comparison isn't 0.566 against some smaller number - it's 0.566
+  against a model that structurally cannot represent the task.
+- Recall (0.670) trails precision (0.886) by a wide margin: the model misses objects more
+  often than it invents them. Consistent with the class imbalance found in yesterday's audit.
+
+**Re-baseline (`results/finetuned-fp32.json`)**
+- Fine-tuned FP32: p50 **15.851 ms**, p95 19.65 ms, **61.2 FPS**, 2256 MB, 45.6 W.
+- Against yesterday's pretrained baseline (16.31 ms / 60.0 FPS) that is 2.8 % faster - and
+  the cause is the 17-class head replacing the 80-class one, not any optimisation work.
+  Confirms the decision to re-baseline: keeping the old denominator would have folded 2.8 %
+  of free architectural speedup into the Checkpoint 1 claim.
+
+**Structured pruning: attempted, root-caused, descoped**
+
+Ran the plan's W3 pruning task. It failed silently at first - the script completed, printed a
+successful forward pass, saved a model, and reported 0.0 % of parameters removed, with no
+error raised. Debugging path:
+
+1. First hypothesis: the ignore list was too coarse. I had protected the whole `Detect`
+   module, and YOLO's neck concatenates backbone features, so a "these channels are fixed"
+   constraint can propagate backwards across concat groups and freeze the network. Narrowed
+   the protection to only the layers whose output shape is semantically fixed (`cv2[i][-1]`
+   for the 4x reg_max box outputs, `cv3[i][-1]` for the 17 class scores, and `dfl.conv`).
+   Still 0 %. Rejected.
+2. Second hypothesis: eval vs train mode changes what gets traced. Tested as a 2x2 matrix
+   ({eval, train} x {coarse, fine ignore list}) rather than one variable at a time. All four
+   combinations returned 0 prunable groups. Both hypotheses eliminated in one pass.
+3. Two dead hypotheses meant I was debugging at the wrong altitude - configuring the pruner
+   when the problem was underneath it. Queried torch-pruning's `DependencyGraph` directly:
+   **1 group total, and the model's first convolution was not in the graph at all.** That
+   reframed the question from "why won't it prune?" to "why is the graph empty?".
+4. **Root cause: Ultralytics loads checkpoints with `requires_grad=False` on all 256
+   parameters.** torch-pruning discovers layer connectivity by walking the autograd graph,
+   and autograd only records operations on tensors that require gradients. No gradients, no
+   recorded graph, nothing to prune. An inference-side optimisation silently disabling a
+   tool that depends on training machinery.
+5. Forcing `requires_grad_(True)` fixed that blocker - tracing then began, and died with a
+   **`MemoryError`** inside `torch_pruning/dependency/index_mapping.py`. The dependency
+   resolver allocates a Python object per channel index and re-maps those lists at every
+   coupling; YOLO11's C3k2 blocks chain those couplings deeply enough that memory use
+   explodes. It exhausted **18 GB of available RAM** to analyse a 2.6M-parameter model, on
+   both CPU and GPU. That is a library scalability limit on this architecture, not a
+   hardware constraint - no plausible machine fixes it.
+
+**Decision: descoped to winter, per the rule written into the roadmap in July.**
+- Checkpoint 1 (>= 3x speedup) is reachable through INT8 TensorRT alone; pruning was always
+  the optional second multiplier, which is exactly why the descope rule existed in advance.
+- Deciding this by executing a pre-committed rule, rather than by how invested I felt after
+  two hours of debugging, is the point of having written the rule down before starting.
+- Even a success would not have fit: the full W3 cycle needs four more traces plus recovery
+  fine-tunes. At the observed cost per trace, the technique was unusable within the session
+  regardless of whether it eventually completed.
+- Winter options, in rough order of promise: pin an older torch-pruning / Ultralytics pair,
+  try YOLOv8 (much better tested with this library) instead of YOLO11, or write the
+  dependency handling manually for the specific blocks involved.
+
+**What I learned**
+- Structured pruning removes whole channels (filters), so the model is physically smaller and
+  genuinely faster on ordinary hardware. Unstructured pruning zeroes individual weights: the
+  tensor keeps its shape, and without sparse-kernel support nothing gets faster. That
+  distinction is the reason this project targets channels.
+- Pruning is always prune -> accuracy drops -> short recovery fine-tune -> most of it returns.
+  The surviving filters have to redistribute work the removed ones were doing.
+- Silent failures are worse than crashes. A 0.0 % result with no exception cost far more time
+  than an error message would have. Checking the *magnitude* of a result, not just its
+  absence of errors, is the lesson.
+- When two hypotheses in a row are wrong, the problem is probably a layer below where I'm
+  looking.
+
+**Open questions carried forward**
+- `docs/learning-notes/pruning.md` is still owed, and writing it is the point: setting out
+  structured vs unstructured pruning and the prune -> recover cycle in my own words is the
+  test of whether I actually hold the concepts or merely recognise them.
+- The deeper gap is architectural. I do not yet have a mental model of *why* YOLO11's C3k2
+  blocks couple tightly enough that dependency resolution explodes, or of how torch-pruning
+  represents those coupled groups internally. That is what to study before retrying in
+  winter - without it, any fix would be guesswork rather than reasoning.
+
+**Status vs plan**
+- W2 fully closed. W3 partially closed: pruning attempted and documented, ablation table not
+  produced. Moving to W4 (INT8 + TensorRT) with the unpruned fine-tuned model as input, which
+  the roadmap already sanctioned as the fallback path.
+
+**Next**
+- W4: export ONNX -> TensorRT FP16 engine -> benchmark; then INT8 with a calibration set from
+  the training images -> benchmark.
+- Build the comparison table: FP32 PyTorch / FP16 TRT / INT8 TRT, all against the 15.851 ms
+  fine-tuned denominator.
+- Wire mAP measurement into the benchmark harness - Checkpoint 1 is a speedup claim *at a
+  stated accuracy cost*, and the accuracy half is still missing.
+
+### Same day, later - W4 started: TensorRT installed, FP16 engine built and measured
+
+**Done**
+- Installed TensorRT 11.1 plus the ONNX toolchain; wrote `scripts/export.py` for the
+  .pt -> ONNX -> .engine pipeline with an `fp16` / `int8` switch.
+- Added mAP measurement to the benchmark harness behind a `--val-data` flag. It runs the
+  Ultralytics validator in a separate function, deliberately outside the timing loop -
+  validation streams the whole val split with NMS and metric bookkeeping, which has nothing
+  to do with per-frame inference cost and would corrupt both numbers if mixed in.
+- Built the FP16 engine (141 s of kernel search, 6.8 MB) and benchmarked it.
+
+**FP16 result**
+- p50 **8.01 ms**, **121.1 FPS**, 2683 MB VRAM, 48.1 W, mAP50-95 0.5604.
+- Against the 15.851 ms fine-tuned FP32 denominator that is a **1.98x speedup** - so FP16
+  alone delivers two thirds of the Checkpoint 1 target, and INT8 needs to contribute roughly
+  another 1.5x.
+- Note VRAM went *up* (2256 -> 2683 MB): the TensorRT engine allocates its own activation
+  and workspace memory. Faster does not automatically mean smaller in every dimension, which
+  is worth remembering for the W5 controller where VRAM headroom matters.
+- The accuracy comparison is **not yet valid**. 0.5604 was measured by our validator; the
+  ~0.566 from training came from Ultralytics' internal validation loop. Comparing across two
+  different measurement paths would not be a real delta. Re-measuring the FP32 model through
+  our own harness first, so the FP16 accuracy cost is a like-for-like number.
+
+**Incident: TensorRT install silently replaced CUDA PyTorch with a CPU build**
+- After installing TensorRT, inference failed with `torch.cuda.is_available(): False`. Cause:
+  `torch` had been upgraded from 2.5.1+cu121 to 2.13.0+cpu. TensorRT pulls in
+  `nvidia-modelopt`, which requires a newer torch, and pip resolved that from default PyPI -
+  where the package named `torch` is the CPU-only build. CUDA builds exist only on PyTorch's
+  own index. The install reported success; nothing surfaced until runtime.
+- Fix: `pip install --force-reinstall torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+  --index-url https://download.pytorch.org/whl/cu121`. Verified 2.5.1+cu121 with CUDA
+  available again.
+- Prevention, applied from here on: when installing ML tooling alongside a working CUDA
+  stack, pin torch explicitly in the same command or install with `--no-deps` and add
+  dependencies deliberately. The TensorRT engine itself was unaffected - engines are
+  self-contained compiled binaries and do not call into PyTorch at inference time.
+
+**Next**
+- Re-measure fine-tuned FP32 through our harness with `--val-data` to get a like-for-like
+  accuracy baseline.
+- Export and benchmark INT8 (calibration pass over training images).
+- Write `scripts/compare.py` to build the results table from the committed JSONs.
+- Re-run the final configuration with `--runs 3` before publishing any headline number.

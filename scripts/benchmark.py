@@ -115,6 +115,28 @@ def git_commit() -> str | None:
         return None
 
 
+def measure_map(weights: str, data_yaml: str, imgsz: int, device: str):
+    """Run the Ultralytics validator to get mAP on the validation split.
+
+    Kept separate from the latency loop on purpose: validation streams the whole
+    val set through the model with NMS and metric bookkeeping, which has nothing
+    to do with per-frame inference cost. Mixing the two would corrupt both numbers.
+
+    Checkpoint 1 is a speedup claim *at a stated accuracy cost* -- quantization
+    trades precision for speed, so a latency figure without the matching mAP is
+    only half a result.
+    """
+    print(f"[info] measuring mAP on validation split ({data_yaml})...")
+    m = YOLO(weights)
+    metrics = m.val(data=data_yaml, imgsz=imgsz, device=device, verbose=False)
+    return {
+        "map50_95": round(float(metrics.box.map), 4),
+        "map50": round(float(metrics.box.map50), 4),
+        "precision": round(float(metrics.box.mp), 4),
+        "recall": round(float(metrics.box.mr), 4),
+    }
+
+
 def run_once(model, frames, imgsz, device, warmup, measure, probe):
     """One complete warm-up + measurement pass. Returns metrics for this run."""
     # --- warm-up: run and discard -------------------------------------------
@@ -171,6 +193,12 @@ def main():
     ap.add_argument("--frames", type=int, default=200, help="distinct frames to hold in RAM")
     ap.add_argument("--notes", default="", help="free text stored in the JSON")
     ap.add_argument(
+        "--val-data",
+        default=None,
+        help="dataset yaml; if set, also measures mAP50-95 on the validation split. "
+             "A speedup number without its accuracy cost is not a claim.",
+    )
+    ap.add_argument(
         "--end-to-end",
         action="store_true",
         help="keep resize inside the timed loop (pipeline latency instead of model latency)",
@@ -215,7 +243,9 @@ def main():
         },
         # Accuracy is measured separately with model.val() until W4 wires it in.
         # The key exists now so the schema does not change when it does.
-        "map50_95": None,
+        "map50_95": measure_map(args.model, args.val_data, args.imgsz, args.device)
+        if args.val_data
+        else None,
         "runs_detail": runs,
         "summary": {
             "p50_ms": round(statistics.median(r["latency_ms"]["p50"] for r in runs), 3),

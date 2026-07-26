@@ -27,6 +27,11 @@ share/python-wheels/
 MANIFEST
 runs/
 *.pt
+# TensorRT engines are compiled binaries tied to one GPU architecture and TRT
+# version - they cannot be reused by anyone else, so they are build artifacts,
+# not source. Rebuild with scripts/export.py; provenance lives in models/README.md.
+*.engine
+*.onnx
 # Datasets: too large for git. Provenance recorded in docs/datasets.md instead.
 datasets/
 # Benchmark input clips
