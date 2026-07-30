@@ -50,7 +50,9 @@ def main():
 
     out_dir = REPO_ROOT / "models"
     out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / f"yolo11n-indoor-{args.precision}.engine"
+    # imgsz is part of the filename: engines at different input sizes are different
+    # artifacts, and omitting it means a 512 px build silently overwrites the 640 px one.
+    out_path = out_dir / f"yolo11n-indoor-{args.precision}-{args.imgsz}.engine"
 
     model = YOLO(args.weights)
 

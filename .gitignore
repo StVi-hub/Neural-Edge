@@ -27,6 +27,8 @@ share/python-wheels/
 MANIFEST
 runs/
 *.pt
+claude.md
+ROADMAP.md
 # TensorRT engines are compiled binaries tied to one GPU architecture and TRT
 # version - they cannot be reused by anyone else, so they are build artifacts,
 # not source. Rebuild with scripts/export.py; provenance lives in models/README.md.

@@ -55,12 +55,20 @@ class GpuProbe:
             print(f"[warn] NVML unavailable ({exc}); power/VRAM will be null")
 
     def sample(self):
-        """Return (vram_mb, power_w), or (None, None) if NVML is unavailable."""
+        """Return (vram_mb, power_w, sm_clock_mhz), or Nones if NVML is unavailable.
+
+        The SM clock is sampled because GPUs continuously vary it with temperature and
+        power headroom. An unlocked clock is the dominant source of run-to-run variance
+        -- measured at ~8-15% here, which is larger than the differences between some
+        precision variants. Recording it makes that visible in the result file instead
+        of silently corrupting comparisons.
+        """
         if self.handle is None:
-            return None, None
+            return None, None, None
         mem = self.pynvml.nvmlDeviceGetMemoryInfo(self.handle)
         power_mw = self.pynvml.nvmlDeviceGetPowerUsage(self.handle)
-        return mem.used / 1024**2, power_mw / 1000.0
+        clock = self.pynvml.nvmlDeviceGetClockInfo(self.handle, self.pynvml.NVML_CLOCK_SM)
+        return mem.used / 1024**2, power_mw / 1000.0, clock
 
     def static_info(self):
         if self.handle is None:
@@ -146,7 +154,7 @@ def run_once(model, frames, imgsz, device, warmup, measure, probe):
         torch.cuda.synchronize()
 
     # --- measure ------------------------------------------------------------
-    times_ms, power_samples, vram_samples = [], [], []
+    times_ms, power_samples, vram_samples, clock_samples = [], [], [], []
     for i in range(measure):
         frame = frames[i % len(frames)]
 
@@ -159,10 +167,11 @@ def run_once(model, frames, imgsz, device, warmup, measure, probe):
         times_ms.append((t1 - t0) * 1000.0)
 
         if i % 10 == 0:  # sampling every frame would itself cost time
-            vram, power = probe.sample()
+            vram, power, clock = probe.sample()
             if power is not None:
                 power_samples.append(power)
                 vram_samples.append(vram)
+                clock_samples.append(clock)
 
     return {
         "latency_ms": {
@@ -176,6 +185,15 @@ def run_once(model, frames, imgsz, device, warmup, measure, probe):
         "fps": round(1000.0 / float(np.mean(times_ms)), 2),
         "vram_mb": round(max(vram_samples), 1) if vram_samples else None,
         "power_w_mean": round(float(np.mean(power_samples)), 2) if power_samples else None,
+        # Clock spread is the honesty check: a locked clock gives ~0%, an unlocked one
+        # drifts and every latency figure inherits that drift.
+        "sm_clock_mhz": {
+            "min": min(clock_samples),
+            "max": max(clock_samples),
+            "mean": round(float(np.mean(clock_samples)), 1),
+            "spread_pct": round(100.0 * (max(clock_samples) - min(clock_samples))
+                                / max(clock_samples), 2),
+        } if clock_samples else None,
         "frames_measured": measure,
     }
 
@@ -266,6 +284,14 @@ def main():
     print(f"\n=== {args.label} ===")
     print(f"  p50 {s['p50_ms']} ms | p95 {s['p95_ms']} ms | {s['fps']} FPS")
     print(f"  VRAM {s['vram_mb']} MB | power {s['power_w_mean']} W")
+
+    clock = runs[0].get("sm_clock_mhz")
+    if clock:
+        print(f"  SM clock {clock['min']}-{clock['max']} MHz (spread {clock['spread_pct']}%)")
+        if clock["spread_pct"] > 3.0:
+            print("  WARNING: clock not locked -- this run's latency carries that drift.")
+            print("           Lock with:  nvidia-smi -lgc 1700,1700   (admin shell)")
+            print("           Reset with: nvidia-smi -rgc")
     print(f"  -> {out_path.relative_to(REPO_ROOT)}")
 
 
