@@ -228,6 +228,9 @@ error raised. Debugging path:
 - Note VRAM went *up* (2256 -> 2683 MB): the TensorRT engine allocates its own activation
   and workspace memory. Faster does not automatically mean smaller in every dimension, which
   is worth remembering for the W5 controller where VRAM headroom matters.
+  **[RETRACTED 2026-07-30 - this was an artefact of an unlocked GPU clock. Measured
+  properly, TensorRT engines use roughly HALF the VRAM of the PyTorch model. See the
+  2026-07-30 entry.]**
 - The accuracy comparison is **not yet valid**. 0.5604 was measured by our validator; the
   ~0.566 from training came from Ultralytics' internal validation loop. Comparing across two
   different measurement paths would not be a real delta. Re-measuring the FP32 model through
@@ -253,3 +256,109 @@ error raised. Debugging path:
 - Export and benchmark INT8 (calibration pass over training images).
 - Write `scripts/compare.py` to build the results table from the committed JSONs.
 - Re-run the final configuration with `--runs 3` before publishing any headline number.
+
+## 2026-07-30 - W4 closed: Checkpoint 1 met at ~3x, and three conclusions retracted
+
+**Checkpoint 1: MET.** FP16 TensorRT at 512 px input runs at **4.87 ms p50 / 201 FPS**
+against the fine-tuned FP32 baseline's 14.59 ms - **~3x** - at an accuracy cost of
+mAP50-95 0.5764 -> 0.5492, a 4.7 % relative drop. Both halves of that sentence are the
+claim; the speedup alone would be meaningless.
+
+### Final results (GPU clock pinned at 1710 MHz, 3 runs each)
+
+`nvidia-smi -lgc 1700,1700` sets the min and max graphics clock to the same value, pinning
+it rather than defining a range. The GPU settled on 1710 MHz - clocks exist only in discrete
+bins and 1700 is not one of them. Every run recorded 1710-1710 MHz, 0.0 % spread, which is
+the confirmation that the lock actually took effect.
+
+| variant | p50 ms | FPS | speedup | mAP50-95 | FPS/W |
+|---|---|---|---|---|---|
+| fp16-trt-512 | 4.87 | 201.1 | **3.00x** | 0.5492 (-0.0272) | 3.50 |
+| fp16-trt (640) | 6.13 | 154.1 | 2.38x | 0.5600 (-0.0164) | 2.63 |
+| int8-trt (640) | 7.56 | 130.0 | 1.93x | 0.5537 (-0.0227) | 2.12 |
+| finetuned-fp32 | 14.59 | 65.3 | 1.00x | 0.5764 | 1.06 |
+
+Efficiency scales more strongly than latency: 3.3x better FPS/Watt at 512 px. For a
+project whose thesis is energy-constrained inference, that is arguably the headline
+number rather than the speedup.
+
+### The methodological failure that dominated this session
+
+Every measurement before tonight was taken with the GPU clock unlocked. The RTX 2060
+idles at ~1110 MHz and boosts to 2100 MHz depending on temperature and power headroom,
+which produced 8-15 % run-to-run variance. I never actually locked them, so from now on I will include it in my benchmarking procedure seeing the big impact.
+
+**Three conclusions I had already written down turned out to be artefacts of that noise:**
+
+1. *"INT8 is marginally faster than FP16."* Wrong. INT8 is 23 % slower (7.56 vs 6.13 ms).
+   The single-run data had them within 2.5 % - inside the noise band.
+2. *"TensorRT increases VRAM (2683 vs 2256 MB)."* Wrong, and backwards. Engines use
+   roughly half the memory of the PyTorch model.
+3. *"512 px input buys nothing, so the pipeline has hit an overhead floor and is no
+   longer compute-bound."* Wrong. Unlocked, 512 px measured 1.3 % faster than 640 px;
+   locked, it is **20 %** faster. The pipeline is still substantially compute-bound.
+
+The third one mattered most, because it was a *diagnosis* rather than a data point. I had
+concluded from it that further model-level optimisation was pointless and that only
+overhead reduction could help - and I nearly acted on that. Decomposing the corrected
+numbers (36 % fewer pixels giving 20 % less time) puts fixed overhead at ~2.6 ms and
+compute at ~3.5 ms of the 6.13 ms at 640 px: overhead is significant but not dominant.
+
+Lesson, stated plainly because it can cost a lot of time and resources: **an unlocked GPU clock does
+not merely add uncertainty to a benchmark, it manufactures false findings that look
+like results.** The variance was larger than several of the effects being measured, so
+the noise was reliably mistaken for signal. Clock locking is now step one of the
+protocol, and `benchmark.py` samples the SM clock every run, records min/max/spread in
+the JSON, and warns above 3 % spread. A result with high spread is not publishable.
+
+### INT8: measured, root-caused, rejected
+
+INT8 is the slowest TensorRT variant at 1.93x - worse than FP16 on speed, accuracy *and*
+power. Root cause, in two parts:
+
+- Ultralytics' INT8 export bakes quantize/dequantize nodes into the ONNX graph.
+  TensorRT 11.1's Myelin compiler cannot infer types across them ("Could not infer output
+  types for operation: dequantize"), so it rejects the fused tactics and falls back to
+  FP16 kernels - while still paying the Q/DQ overhead. Worst of both.
+- I tried to bypass this by having TensorRT run its own entropy calibration from the
+  clean FP32 graph. **That API no longer exists.** TensorRT 11 has no calibrator classes,
+  no `BuilderFlag.INT8`, and no `BuilderFlag.FP16`; it offers
+  `NetworkDefinitionCreationFlag.STRONGLY_TYPED` instead. TensorRT 11 is strongly-typed
+  only - precision comes from the ONNX graph's dtypes and the builder obeys them. This
+  completes the removal of implicit quantization, deprecated in TensorRT 10.
+
+So Ultralytics was not misusing the API: baking Q/DQ into ONNX is now the *only* INT8
+path. The failure is TensorRT 11.1 being unable to compile the Q/DQ pattern YOLO11's
+architecture produces. Fixing it means either downgrading to TensorRT 10 (which still
+has calibrators) or rewriting Q/DQ placement with nvidia-modelopt. Both are options to analyse.
+
+**FP16 is the shipped engine.**
+
+### Also done
+
+- `scripts/build_engine.py`: builds engines through the TensorRT Python API directly,
+  making each stage explicit (logger, builder, strongly-typed network, ONNX parser,
+  config, serialize) rather than hidden behind Ultralytics or trtexec flags. `trtexec`
+  is not available - pip ships the libraries and bindings but not the CLI tools.
+- `scripts/compare.py`: generates the results table from committed JSONs, and flags
+  single-run results and missing accuracy measurements rather than quietly tabulating
+  them.
+- `export.py` now includes `imgsz` in engine filenames; a 512 px build had silently
+  overwritten the 640 px engine.
+- 512 px is reported as a measured, accepted trade rather than a free win: 20 % faster
+  for 4.7 % less accuracy. The 640 px engine remains the better default when accuracy
+  matters; 512 px is what reaches 3x.
+
+**Status vs plan**
+- W4 closed on 30 Jul, inside its scheduled window (27 Jul - 2 Aug). Checkpoint 1 met.
+  The W1-W2 slippage has been absorbed; the W3 descope is what bought the time back.
+- W3 (pruning) remains descoped to winter.
+- W5 (telemetry + controller) is next and is the piece that cannot be rushed.
+
+**Next**
+- W5: telemetry schema v1 (a public contract - Aether-Link implements the producing side
+  in August), simulated and host providers, then the controller state machine with
+  hysteresis and cooldown.
+- Winter backlog gains: TensorRT 10 for a working INT8 calibrator path, and reducing
+  per-call overhead (~2.6 ms of the 6.13 ms at 640 px) by calling the TensorRT runtime
+  directly instead of through Ultralytics' per-frame Python path.
