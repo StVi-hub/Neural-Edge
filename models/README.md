@@ -7,7 +7,9 @@ so every result in `results/` traces back to a reproducible artifact.
 | File | Built from | Command | Notes |
 |---|---|---|---|
 | `runs/detect/indoor-nav-v1/weights/best.pt` | `yolo11n.pt` (COCO-pretrained) | `python scripts/train.py` | Fine-tuned on indoor-nav, 60 epochs, batch 8, 640 px. mAP50-95 0.566 at training time. |
-| `models/yolo11n-indoor-fp16.engine` | `best.pt` | `python scripts/export.py --precision fp16` | TensorRT FP16. 6.8 MB, 141 s kernel search. |
+| `models/yolo11n-indoor-fp16-640.engine` | `best.pt` | `python scripts/export.py --precision fp16` | TensorRT FP16 at 640 px. 6.8 MB. Measured 6.07 ms / 159 FPS / 2.37x. |
+| `models/yolo11n-indoor-int8-640.engine` | `best.pt` | `python scripts/export.py --precision int8` | TensorRT INT8 at 640 px. 6.3 MB. **Slower than FP16** (7.34 ms) — most layers fall back to FP16 kernels while still paying quantize/dequantize overhead. |
+| `models/yolo11n-indoor-fp16-512.engine` | `best.pt` | `python scripts/export.py --precision fp16 --imgsz 512` | TensorRT FP16 at 512 px, built to test whether reduced input closes the Checkpoint 1 gap. |
 | `models/pruned20.pt` | `best.pt` | `python scripts/prune.py --sparsity 0.20` | **Not a valid artifact.** 0 % of channels were actually removed — see the 2026-07-26 devlog entry. Kept only as a record of the attempt. |
 
 ## Why engines are not committed

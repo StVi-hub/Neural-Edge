@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "label": "finetuned-fp32",
-  "timestamp_utc": "2026-07-30T20:38:49+00:00",
+  "label": "fp16-trt-512",
+  "timestamp_utc": "2026-07-30T20:40:26+00:00",
   "git_commit": "348dbf1",
   "config": {
-    "model": "runs/detect/indoor-nav-v1/weights/best.pt",
+    "model": "models/yolo11n-indoor-fp16-512.engine",
     "source": "clip.mp4",
-    "imgsz": 640,
+    "imgsz": 512,
     "device": "0",
     "warmup": 100,
     "measure": 500,
@@ -23,22 +23,22 @@
     "driver_version": "610.62"
   },
   "map50_95": {
-    "map50_95": 0.5764,
-    "map50": 0.7532,
-    "precision": 0.8804,
-    "recall": 0.6674
+    "map50_95": 0.5492,
+    "map50": 0.7684,
+    "precision": 0.7867,
+    "recall": 0.7464
   },
   "runs_detail": [
     {
       "latency_ms": {
-        "p50": 14.587,
-        "p95": 21.549,
-        "mean": 15.353,
-        "stdev": 2.487
+        "p50": 4.792,
+        "p95": 6.577,
+        "mean": 4.957,
+        "stdev": 0.582
       },
-      "fps": 65.14,
-      "vram_mb": 1405.7,
-      "power_w_mean": 61.59,
+      "fps": 201.72,
+      "vram_mb": 1378.6,
+      "power_w_mean": 57.55,
       "sm_clock_mhz": {
         "min": 1710,
         "max": 1710,
@@ -49,14 +49,14 @@
     },
     {
       "latency_ms": {
-        "p50": 14.614,
-        "p95": 20.253,
-        "mean": 15.324,
-        "stdev": 2.486
+        "p50": 4.869,
+        "p95": 5.665,
+        "mean": 4.972,
+        "stdev": 0.347
       },
-      "fps": 65.26,
-      "vram_mb": 1398.5,
-      "power_w_mean": 61.94,
+      "fps": 201.13,
+      "vram_mb": 1374.5,
+      "power_w_mean": 57.62,
       "sm_clock_mhz": {
         "min": 1710,
         "max": 1710,
@@ -67,14 +67,14 @@
     },
     {
       "latency_ms": {
-        "p50": 14.382,
-        "p95": 17.861,
-        "mean": 14.762,
-        "stdev": 1.51
+        "p50": 4.865,
+        "p95": 6.559,
+        "mean": 5.089,
+        "stdev": 0.828
       },
-      "fps": 67.74,
-      "vram_mb": 1394.0,
-      "power_w_mean": 62.29,
+      "fps": 196.5,
+      "vram_mb": 1371.6,
+      "power_w_mean": 57.34,
       "sm_clock_mhz": {
         "min": 1710,
         "max": 1710,
@@ -85,11 +85,11 @@
     }
   ],
   "summary": {
-    "p50_ms": 14.587,
-    "p95_ms": 20.253,
-    "fps": 65.26,
-    "vram_mb": 1405.7,
-    "power_w_mean": 61.59
+    "p50_ms": 4.865,
+    "p95_ms": 6.559,
+    "fps": 201.13,
+    "vram_mb": 1378.6,
+    "power_w_mean": 57.55
   },
   "notes": ""
 }
